@@ -1,3 +1,17 @@
+// Environment variables debug
+console.log('🔍 Environment Check:');
+console.log('IG_USERNAME exists:', !!process.env.IG_USERNAME);
+console.log('IG_PASSWORD exists:', !!process.env.IG_PASSWORD);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
+// Instagram credentials
+const IG_USERNAME = process.env.IG_USERNAME;
+const IG_PASSWORD = process.env.IG_PASSWORD;
+
+if (!IG_USERNAME || !IG_PASSWORD) {
+    console.error('❌ Missing Instagram credentials in environment variables');
+    console.log('Available env vars:', Object.keys(process.env).filter(k => k.startsWith('IG_')));
+}
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -234,3 +248,4 @@ async function downloadTikTok(url) {
 })();
 
 module.exports = app;
+
