@@ -280,3 +280,4 @@ app.listen(PORT, () => {
     console.log('🔑 RapidAPI: Configured ✅');
     console.log('📱 Features: 6 endpoints ready');
 });
+
