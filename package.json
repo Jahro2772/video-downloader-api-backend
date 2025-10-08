@@ -1,17 +1,30 @@
 {
-  "name": "video-downloader-backend",
-  "version": "1.0.0",
+  "name": "video-downloader-api-backend",
+  "version": "2.0.0",
+  "description": "Video downloader API for Instagram, Facebook, Pinterest",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "video",
+    "downloader",
+    "instagram",
+    "facebook",
+    "pinterest"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "dependencies": {
-    "axios": "^1.12.2",
-    "cheerio": "^1.1.2",
-    "cors": "^2.8.5",
-    "express": "^4.21.2"
   }
 }
