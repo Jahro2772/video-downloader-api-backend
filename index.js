@@ -1,3 +1,6 @@
+// Instagram credentials - GEÇİCİ TEST (sonra düzelteceğiz)
+const IG_USERNAME = 'youstartakademi';
+const IG_PASSWORD = 'Budka4727..';
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -210,3 +213,4 @@ app.listen(PORT, () => {
     console.log('✅ Server running on port', PORT);
     console.log('🔐 Instagram Private API', igClient ? '✅ Configured' : '❌ Not configured');
 });
+
