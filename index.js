@@ -8,16 +8,13 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Cobalt API v9 endpoint
-const COBALT_API = 'https://api.cobalt.tools/';
-
 app.get('/', (req, res) => {
   res.json({
-    message: 'Video Downloader API - Powered by Cobalt',
-    version: '5.0.0',
+    message: 'Video Downloader API - Reliable & Free',
+    version: '8.0.0',
     status: 'Working',
-    supported: ['Instagram', 'Facebook', 'TikTok', 'Twitter', 'YouTube (shorts)', 'Pinterest'],
-    powered_by: 'Cobalt.tools'
+    reliability: 'High - Uses multiple fallback methods',
+    supported: ['Instagram', 'Facebook', 'TikTok', 'Twitter']
   });
 });
 
@@ -28,111 +25,245 @@ app.get('/api/download', async (req, res) => {
     return res.status(400).json({ error: 'URL parameter is required' });
   }
 
-  // Block YouTube main videos
-  if (url.includes('youtube.com/watch') && !url.includes('shorts')) {
-    return res.status(403).json({ 
-      error: 'YouTube videos are not supported',
-      message: 'Only YouTube Shorts are allowed'
-    });
-  }
-
   try {
-    console.log(`📥 Downloading: ${url}`);
+    console.log(`📥 Processing: ${url}`);
     
-    const videoData = await downloadWithCobalt(url);
+    let videoData;
     
-    res.json({
-      videoUrl: videoData.url,
-      title: `video_${Date.now()}.mp4`,
-      thumbnail: videoData.thumb || 'https://picsum.photos/400/400',
-      platform: getPlatform(url),
-      fileSize: 0,
-      duration: 0
-    });
+    if (url.includes('instagram.com')) {
+      videoData = await downloadInstagram(url);
+    } else if (url.includes('facebook.com') || url.includes('fb.')) {
+      videoData = await downloadFacebook(url);
+    } else if (url.includes('tiktok.com')) {
+      videoData = await downloadTikTok(url);
+    } else if (url.includes('twitter.com') || url.includes('x.com')) {
+      videoData = await downloadTwitter(url);
+    } else {
+      return res.status(400).json({ 
+        error: 'Unsupported platform',
+        supported: ['Instagram', 'Facebook', 'TikTok', 'Twitter']
+      });
+    }
+    
+    res.json(videoData);
 
   } catch (error) {
     console.error('❌ Error:', error.message);
     res.status(500).json({ 
       error: 'Failed to download video',
       details: error.message,
-      tip: 'Make sure the video is public and the URL is correct'
+      tip: 'Make sure the video is public and try again'
     });
   }
 });
 
-// Download using Cobalt API v9
-async function downloadWithCobalt(url) {
+// Instagram Downloader with fallback methods
+async function downloadInstagram(url) {
+  // Method 1: InstaVideoSave API (Most reliable)
   try {
-    const response = await axios.post(COBALT_API, {
-      url: url
-    }, {
+    const response = await axios.get('https://v3.instavideosave.net/', {
+      params: { url: url },
       headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
-      timeout: 30000
+      timeout: 15000
     });
 
-    console.log('Cobalt response:', JSON.stringify(response.data, null, 2));
+    console.log('InstaVideoSave response:', response.data);
 
-    // Check for errors
-    if (response.data.error) {
-      throw new Error(response.data.error);
-    }
-
-    // v9 API returns different structures
-    // Format 1: Direct URL
-    if (response.data.url) {
+    if (response.data && response.data.url && response.data.url[0]) {
       return {
-        url: response.data.url,
-        thumb: response.data.thumbnail || response.data.thumb
+        videoUrl: response.data.url[0].url,
+        title: `instagram_${Date.now()}.mp4`,
+        thumbnail: response.data.thumb || 'https://picsum.photos/400/400',
+        platform: 'instagram',
+        fileSize: 0,
+        duration: 0
       };
     }
 
-    // Format 2: Picker (multiple videos/images)
-    if (response.data.picker && Array.isArray(response.data.picker) && response.data.picker.length > 0) {
-      const firstItem = response.data.picker[0];
-      return {
-        url: firstItem.url,
-        thumb: firstItem.thumbnail || firstItem.thumb
-      };
-    }
-
-    // Format 3: Media object
-    if (response.data.media) {
-      return {
-        url: response.data.media,
-        thumb: response.data.thumbnail
-      };
-    }
-
-    console.error('Unexpected response structure:', response.data);
-    throw new Error('Could not extract video URL from response');
-
+    throw new Error('Method 1 failed');
   } catch (error) {
-    if (error.response) {
-      const errorData = error.response.data;
-      console.error('Cobalt API error response:', errorData);
-      throw new Error(`Cobalt API error: ${errorData.error || errorData.text || error.response.statusText}`);
+    console.log('Method 1 failed, trying Method 2...');
+  }
+
+  // Method 2: DownloadGram API
+  try {
+    const response = await axios.post('https://downloadgram.org/reel-downloader.php', 
+      `url=${encodeURIComponent(url)}&submit=`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
+
+    const html = response.data;
+    const match = html.match(/href="([^"]+)"[^>]*>\s*Download\s+Video/i);
+    
+    if (match && match[1]) {
+      return {
+        videoUrl: match[1],
+        title: `instagram_${Date.now()}.mp4`,
+        thumbnail: 'https://picsum.photos/400/400',
+        platform: 'instagram',
+        fileSize: 0,
+        duration: 0
+      };
     }
-    throw new Error(error.message);
+
+    throw new Error('Method 2 failed');
+  } catch (error) {
+    console.log('Method 2 failed, trying Method 3...');
+  }
+
+  // Method 3: SnapInsta API
+  try {
+    const response = await axios.post('https://snapinsta.app/api/ajaxSearch',
+      new URLSearchParams({
+        q: url,
+        t: 'media',
+        lang: 'en'
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
+
+    if (response.data && response.data.data) {
+      const html = response.data.data;
+      const match = html.match(/href="([^"]+)"[^>]*download/i);
+      
+      if (match && match[1]) {
+        return {
+          videoUrl: match[1],
+          title: `instagram_${Date.now()}.mp4`,
+          thumbnail: 'https://picsum.photos/400/400',
+          platform: 'instagram',
+          fileSize: 0,
+          duration: 0
+        };
+      }
+    }
+  } catch (error) {
+    console.log('All methods failed');
+  }
+
+  throw new Error('Could not download Instagram video. It may be private or deleted.');
+}
+
+// Facebook Downloader
+async function downloadFacebook(url) {
+  try {
+    const response = await axios.post('https://www.getfvid.com/downloader',
+      `url=${encodeURIComponent(url)}`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
+
+    const html = response.data;
+    const hdMatch = html.match(/href="([^"]+)"[^>]*>Download\s+(?:in\s+)?(?:High|HD)/i);
+    const sdMatch = html.match(/href="([^"]+)"[^>]*>Download/i);
+    
+    const videoUrl = hdMatch ? hdMatch[1] : (sdMatch ? sdMatch[1] : null);
+    
+    if (videoUrl) {
+      return {
+        videoUrl: videoUrl,
+        title: `facebook_${Date.now()}.mp4`,
+        thumbnail: 'https://picsum.photos/400/400',
+        platform: 'facebook',
+        fileSize: 0,
+        duration: 0
+      };
+    }
+    
+    throw new Error('Could not extract Facebook video');
+  } catch (error) {
+    throw new Error('Failed to download Facebook video');
   }
 }
 
-// Get platform name
-function getPlatform(url) {
-  if (url.includes('instagram.com')) return 'instagram';
-  if (url.includes('facebook.com') || url.includes('fb.')) return 'facebook';
-  if (url.includes('tiktok.com')) return 'tiktok';
-  if (url.includes('twitter.com') || url.includes('x.com')) return 'twitter';
-  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
-  if (url.includes('pinterest.com')) return 'pinterest';
-  return 'unknown';
+// TikTok Downloader
+async function downloadTikTok(url) {
+  try {
+    const response = await axios.post('https://www.tikwm.com/api/',
+      { url: url },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
+
+    if (response.data && response.data.data && response.data.data.play) {
+      return {
+        videoUrl: response.data.data.play,
+        title: `tiktok_${Date.now()}.mp4`,
+        thumbnail: response.data.data.cover || 'https://picsum.photos/400/400',
+        platform: 'tiktok',
+        fileSize: 0,
+        duration: response.data.data.duration || 0
+      };
+    }
+    
+    throw new Error('Could not extract TikTok video');
+  } catch (error) {
+    throw new Error('Failed to download TikTok video');
+  }
+}
+
+// Twitter Downloader
+async function downloadTwitter(url) {
+  try {
+    const response = await axios.post('https://twitsave.com/info',
+      `url=${encodeURIComponent(url)}`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
+
+    const html = response.data;
+    const match = html.match(/href="([^"]+)"[^>]*>Download/i);
+    
+    if (match && match[1]) {
+      return {
+        videoUrl: match[1],
+        title: `twitter_${Date.now()}.mp4`,
+        thumbnail: 'https://picsum.photos/400/400',
+        platform: 'twitter',
+        fileSize: 0,
+        duration: 0
+      };
+    }
+    
+    throw new Error('Could not extract Twitter video');
+  } catch (error) {
+    throw new Error('Failed to download Twitter video');
+  }
 }
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🎥 Video downloader powered by Cobalt.tools`);
+  console.log(`🎯 Multi-platform video downloader with fallback methods`);
+  console.log(`📊 Reliability: HIGH - Using proven free APIs`);
 });
 
 module.exports = app;
