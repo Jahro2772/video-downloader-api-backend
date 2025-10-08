@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '2bc9ae5da3msh3dd53e63aa343dcp1961c5jsn50d5cac5416d';
 const API_HOST = 'social-media-video-downloader.p.rapidapi.com';
 
 // Helper function for API calls
@@ -405,3 +405,4 @@ app.listen(PORT, () => {
     console.log('🔑 RapidAPI:', RAPIDAPI_KEY ? 'Configured ✅' : 'Not configured ❌');
     console.log('📱 Features: 11 endpoints ready');
 });
+
