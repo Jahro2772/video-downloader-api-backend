@@ -33,7 +33,7 @@ app.get('/', (req, res) => {
     res.json({
         status: 'OK',
         message: 'Multi-Platform Social Media API',
-        version: '4.0.0',
+        version: '5.0.0',
         features: [
             'Instagram Media Download',
             'Instagram User Profile',
@@ -71,12 +71,10 @@ app.get('/api/download', async (req, res) => {
 
         const shortcode = shortcodeMatch[2];
 
-        // Call RapidAPI with correct endpoint
+        // Call RapidAPI
         const data = await callRapidAPI('/instagram/v3/media/post/details', {
             shortcode: shortcode
         });
-
-        console.log('API Response:', JSON.stringify(data, null, 2));
 
         // Check for error
         if (data.error) {
@@ -98,19 +96,22 @@ app.get('/api/download', async (req, res) => {
         let videoUrl = null;
         let thumbnail = null;
 
-        // Check for direct video URL
-        if (content.url) {
-            videoUrl = content.url;
+        // MAIN FIX: Check for videos array first
+        if (content.videos && content.videos.length > 0) {
+            // Get highest quality video (usually first one - 750p)
+            videoUrl = content.videos[0].url;
         }
 
-        // Check for renderable videos
+        // Fallback to renderable videos
         if (!videoUrl && content.renderableVideos && content.renderableVideos.length > 0) {
             const video = content.renderableVideos[0];
             videoUrl = video.url || null;
         }
 
         // Get thumbnail
-        if (content.thumbnail) {
+        if (data.metadata && data.metadata.thumbnailUrl) {
+            thumbnail = data.metadata.thumbnailUrl;
+        } else if (content.thumbnail) {
             thumbnail = content.thumbnail;
         }
 
@@ -127,7 +128,8 @@ app.get('/api/download', async (req, res) => {
             videoUrl: videoUrl,
             thumbnail: thumbnail,
             title: data.metadata?.title || 'Instagram Video',
-            duration: content.metadata?.duration || 0,
+            author: data.metadata?.author?.username || 'Unknown',
+            duration: Math.floor(data.metadata?.additionalData?.video_duration || 0),
             fileSize: 0
         });
 
