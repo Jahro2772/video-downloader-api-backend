@@ -1,12 +1,5 @@
 FROM node:18-alpine
 
-# Install yt-dlp and ffmpeg
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    ffmpeg && \
-    python3 -m pip install --break-system-packages yt-dlp
-
 # Set working directory
 WORKDIR /app
 
