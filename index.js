@@ -1,251 +1,212 @@
-// Environment variables debug
-console.log('🔍 Environment Check:');
-console.log('IG_USERNAME exists:', !!process.env.IG_USERNAME);
-console.log('IG_PASSWORD exists:', !!process.env.IG_PASSWORD);
-console.log('NODE_ENV:', process.env.NODE_ENV);
-
-// Instagram credentials
-const IG_USERNAME = process.env.IG_USERNAME;
-const IG_PASSWORD = process.env.IG_PASSWORD;
-
-if (!IG_USERNAME || !IG_PASSWORD) {
-    console.error('❌ Missing Instagram credentials in environment variables');
-    console.log('Available env vars:', Object.keys(process.env).filter(k => k.startsWith('IG_')));
-}
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
+const cors = require('cors');
 const { IgApiClient } = require('instagram-private-api');
 
 const app = express();
+const PORT = process.env.PORT || 8080;
+
+// CORS
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
-
-// Instagram credentials (Railway environment variables)
+// Instagram credentials
 const IG_USERNAME = process.env.IG_USERNAME || '';
 const IG_PASSWORD = process.env.IG_PASSWORD || '';
 
-let ig = null;
+let igClient = null;
 
-// Initialize Instagram client
-async function initInstagram() {
-  if (!IG_USERNAME || !IG_PASSWORD) {
-    console.log('⚠️  Instagram credentials not configured');
-    return false;
-  }
+// Instagram login
+async function initInstagramClient() {
+    if (!IG_USERNAME || !IG_PASSWORD) {
+        console.log('⚠️  Instagram credentials not configured');
+        return;
+    }
 
-  try {
-    ig = new IgApiClient();
-    ig.state.generateDevice(IG_USERNAME);
-    
-    await ig.account.login(IG_USERNAME, IG_PASSWORD);
-    console.log('✅ Instagram client logged in successfully');
-    return true;
-  } catch (error) {
-    console.error('❌ Instagram login failed:', error.message);
-    return false;
-  }
+    try {
+        igClient = new IgApiClient();
+        igClient.state.generateDevice(IG_USERNAME);
+        await igClient.account.login(IG_USERNAME, IG_PASSWORD);
+        console.log('✅ Instagram session başlatıldı');
+    } catch (error) {
+        console.error('❌ Instagram login failed:', error.message);
+        igClient = null;
+    }
 }
 
+// Server başlarken Instagram'a login
+initInstagramClient();
+
+// Health check
 app.get('/', (req, res) => {
-  res.json({
-    message: 'Video Downloader API - Instagram Private API',
-    version: '9.0.0',
-    status: ig ? 'Working' : 'Instagram Not Configured',
-    supported: ['Instagram', 'Facebook', 'TikTok'],
-    note: 'Using Instagram Private API for reliable downloads'
-  });
-});
-
-app.get('/api/download', async (req, res) => {
-  const { url } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({ error: 'URL parameter is required' });
-  }
-
-  try {
-    console.log(`📥 Processing: ${url}`);
-    
-    let videoData;
-    
-    if (url.includes('instagram.com')) {
-      videoData = await downloadInstagram(url);
-    } else if (url.includes('facebook.com') || url.includes('fb.')) {
-      videoData = await downloadFacebook(url);
-    } else if (url.includes('tiktok.com')) {
-      videoData = await downloadTikTok(url);
-    } else {
-      return res.status(400).json({ 
-        error: 'Unsupported platform',
-        supported: ['Instagram', 'Facebook', 'TikTok']
-      });
-    }
-    
-    res.json(videoData);
-
-  } catch (error) {
-    console.error('❌ Error:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to download video',
-      details: error.message
+    res.json({
+        status: 'OK',
+        message: 'Video Downloader API is running',
+        instagramConfigured: !!igClient,
+        version: '3.0.0'
     });
-  }
 });
 
-// Instagram Downloader using Private API
-async function downloadInstagram(url) {
-  if (!ig) {
-    throw new Error('Instagram client not initialized. Please configure IG_USERNAME and IG_PASSWORD');
-  }
+// Download endpoint
+app.get('/api/download', async (req, res) => {
+    try {
+        const { url } = req.query;
 
-  try {
-    // Extract media ID from URL
-    const mediaId = await getMediaIdFromUrl(url);
-    
-    if (!mediaId) {
-      throw new Error('Could not extract media ID from URL');
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                error: 'URL parameter is required'
+            });
+        }
+
+        console.log('📥 Download request for:', url);
+
+        // Platform detection
+        let platform = 'unknown';
+        if (url.includes('instagram.com')) platform = 'instagram';
+        else if (url.includes('facebook.com') || url.includes('fb.com')) platform = 'facebook';
+        else if (url.includes('pinterest.com')) platform = 'pinterest';
+        else if (url.includes('linkedin.com')) platform = 'linkedin';
+
+        // Instagram Private API
+        if (platform === 'instagram' && igClient) {
+            try {
+                const mediaId = extractInstagramMediaId(url);
+                if (!mediaId) {
+                    throw new Error('Invalid Instagram URL');
+                }
+
+                const mediaInfo = await igClient.media.info(mediaId);
+                const item = mediaInfo.items[0];
+
+                let videoUrl = null;
+                let thumbnail = null;
+
+                if (item.video_versions) {
+                    // Video/Reel
+                    videoUrl = item.video_versions[0].url;
+                    thumbnail = item.image_versions2?.candidates[0]?.url || null;
+                } else if (item.carousel_media) {
+                    // Carousel - ilk video'yu al
+                    const firstVideo = item.carousel_media.find(m => m.video_versions);
+                    if (firstVideo) {
+                        videoUrl = firstVideo.video_versions[0].url;
+                        thumbnail = firstVideo.image_versions2?.candidates[0]?.url || null;
+                    }
+                }
+
+                if (!videoUrl) {
+                    throw new Error('No video found in this post');
+                }
+
+                return res.json({
+                    success: true,
+                    platform: 'instagram',
+                    videoUrl: videoUrl,
+                    thumbnail: thumbnail,
+                    duration: item.video_duration || 0,
+                    fileSize: 0
+                });
+
+            } catch (error) {
+                console.error('Instagram API error:', error.message);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to fetch Instagram video: ' + error.message
+                });
+            }
+        }
+
+        // Facebook fallback
+        if (platform === 'facebook') {
+            try {
+                const response = await axios.get(url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+
+                const html = response.data;
+                const hdMatch = html.match(/"playable_url":"([^"]+)"/);
+                const sdMatch = html.match(/"playable_url_quality_hd":"([^"]+)"/);
+
+                const videoUrl = (hdMatch || sdMatch)?.[1]?.replace(/\\u0025/g, '%').replace(/\\/g, '');
+
+                if (videoUrl) {
+                    return res.json({
+                        success: true,
+                        platform: 'facebook',
+                        videoUrl: videoUrl,
+                        duration: 0,
+                        fileSize: 0
+                    });
+                }
+            } catch (error) {
+                console.error('Facebook scraping error:', error.message);
+            }
+        }
+
+        // Pinterest fallback
+        if (platform === 'pinterest') {
+            try {
+                const response = await axios.get(url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+
+                const html = response.data;
+                const videoMatch = html.match(/"video_list":\{[^}]*"V_720P":\{"url":"([^"]+)"/);
+
+                if (videoMatch) {
+                    return res.json({
+                        success: true,
+                        platform: 'pinterest',
+                        videoUrl: videoMatch[1],
+                        duration: 0,
+                        fileSize: 0
+                    });
+                }
+            } catch (error) {
+                console.error('Pinterest scraping error:', error.message);
+            }
+        }
+
+        // Platform not supported
+        return res.status(400).json({
+            success: false,
+            error: 'Unsupported platform or unable to extract video'
+        });
+
+    } catch (error) {
+        console.error('Server error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error: ' + error.message
+        });
+    }
+});
+
+// Helper function: Extract Instagram media ID
+function extractInstagramMediaId(url) {
+    const patterns = [
+        /instagram\.com\/p\/([A-Za-z0-9_-]+)/,
+        /instagram\.com\/reel\/([A-Za-z0-9_-]+)/,
+        /instagram\.com\/tv\/([A-Za-z0-9_-]+)/
+    ];
+
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) {
+            return igClient.media.getIdFromShortcode(match[1]);
+        }
     }
 
-    // Get media info
-    const mediaInfo = await ig.media.info(mediaId);
-    const item = mediaInfo.items[0];
-
-    let videoUrl = null;
-    let thumbnail = null;
-
-    // Check if it's a video
-    if (item.video_versions && item.video_versions.length > 0) {
-      // Get highest quality video
-      videoUrl = item.video_versions[0].url;
-      thumbnail = item.image_versions2?.candidates?.[0]?.url;
-    } else if (item.carousel_media) {
-      // Handle carousel posts
-      const videoItem = item.carousel_media.find(m => m.video_versions);
-      if (videoItem) {
-        videoUrl = videoItem.video_versions[0].url;
-        thumbnail = videoItem.image_versions2?.candidates?.[0]?.url;
-      }
-    }
-
-    if (!videoUrl) {
-      throw new Error('No video found in this post');
-    }
-
-    return {
-      videoUrl: videoUrl,
-      title: `instagram_${Date.now()}.mp4`,
-      thumbnail: thumbnail || 'https://picsum.photos/400/400',
-      platform: 'instagram',
-      fileSize: 0,
-      duration: item.video_duration || 0
-    };
-
-  } catch (error) {
-    console.error('Instagram Private API error:', error);
-    throw new Error(`Failed to download Instagram video: ${error.message}`);
-  }
-}
-
-// Extract media ID from Instagram URL
-async function getMediaIdFromUrl(url) {
-  try {
-    // Method 1: Extract shortcode from URL
-    const shortcodeMatch = url.match(/(?:reel|p|tv)\/([A-Za-z0-9_-]+)/);
-    if (shortcodeMatch && shortcodeMatch[1]) {
-      const shortcode = shortcodeMatch[1];
-      
-      // Convert shortcode to media ID
-      const mediaId = await ig.media.getIdFromShortcode(shortcode);
-      return mediaId;
-    }
-
-    throw new Error('Invalid Instagram URL format');
-  } catch (error) {
-    console.error('Media ID extraction error:', error);
     return null;
-  }
 }
 
-// Facebook Downloader (fallback to scraping)
-async function downloadFacebook(url) {
-  try {
-    const response = await axios.post('https://www.getfvid.com/downloader',
-      `url=${encodeURIComponent(url)}`,
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'Mozilla/5.0'
-        },
-        timeout: 15000
-      }
-    );
-
-    const html = response.data;
-    const hdMatch = html.match(/href="([^"]+)"[^>]*>Download\s+(?:in\s+)?(?:High|HD)/i);
-    const sdMatch = html.match(/href="([^"]+)"[^>]*>Download/i);
-    
-    const videoUrl = hdMatch ? hdMatch[1] : (sdMatch ? sdMatch[1] : null);
-    
-    if (videoUrl) {
-      return {
-        videoUrl: videoUrl,
-        title: `facebook_${Date.now()}.mp4`,
-        thumbnail: 'https://picsum.photos/400/400',
-        platform: 'facebook',
-        fileSize: 0,
-        duration: 0
-      };
-    }
-    
-    throw new Error('Could not extract Facebook video');
-  } catch (error) {
-    throw new Error('Failed to download Facebook video');
-  }
-}
-
-// TikTok Downloader
-async function downloadTikTok(url) {
-  try {
-    const response = await axios.post('https://www.tikwm.com/api/',
-      { url: url },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0'
-        },
-        timeout: 15000
-      }
-    );
-
-    if (response.data && response.data.data && response.data.data.play) {
-      return {
-        videoUrl: response.data.data.play,
-        title: `tiktok_${Date.now()}.mp4`,
-        thumbnail: response.data.data.cover || 'https://picsum.photos/400/400',
-        platform: 'tiktok',
-        fileSize: 0,
-        duration: response.data.data.duration || 0
-      };
-    }
-    
-    throw new Error('Could not extract TikTok video');
-  } catch (error) {
-    throw new Error('Failed to download TikTok video');
-  }
-}
-
-// Initialize on startup
-(async () => {
-  await initInstagram();
-  
-  app.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
-    console.log(`🔐 Instagram Private API ${ig ? '✅ Ready' : '❌ Not configured'}`);
-  });
-})();
-
-module.exports = app;
-
+// Start server
+app.listen(PORT, () => {
+    console.log('✅ Server running on port', PORT);
+    console.log('🔐 Instagram Private API', igClient ? '✅ Configured' : '❌ Not configured');
+});
