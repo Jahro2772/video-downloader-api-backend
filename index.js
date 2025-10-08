@@ -33,11 +33,12 @@ app.get('/', (req, res) => {
     res.json({
         status: 'OK',
         message: 'Multi-Platform Social Media API',
-        version: '3.0.0',
+        version: '4.0.0',
         features: [
             'Instagram Media Download',
             'Instagram User Profile',
-            'Facebook Posts',
+            'Instagram User ID',
+            'Facebook Post Details',
             'Facebook Profile',
             'TikTok Post',
             'TikTok User'
@@ -45,7 +46,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// 1. Instagram Media Download (Main endpoint)
+// 1. Instagram Media Download
 app.get('/api/download', async (req, res) => {
     try {
         const { url } = req.query;
@@ -70,27 +71,47 @@ app.get('/api/download', async (req, res) => {
 
         const shortcode = shortcodeMatch[2];
 
-        // Call RapidAPI
+        // Call RapidAPI with correct endpoint
         const data = await callRapidAPI('/instagram/v3/media/post/details', {
-            shortcode: shortcode,
-            renderableFormats: '720p,480p,360p',
-            highres: 'true'
+            shortcode: shortcode
         });
 
-        // Extract video URL
+        console.log('API Response:', JSON.stringify(data, null, 2));
+
+        // Check for error
+        if (data.error) {
+            return res.status(400).json({
+                success: false,
+                error: data.error.message || 'Failed to fetch video'
+            });
+        }
+
+        // Extract video from contents array
+        if (!data.contents || data.contents.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'No content found'
+            });
+        }
+
+        const content = data.contents[0];
         let videoUrl = null;
         let thumbnail = null;
 
-        if (data.video_url) {
-            videoUrl = data.video_url;
-        } else if (data.video_versions && data.video_versions.length > 0) {
-            videoUrl = data.video_versions[0].url;
+        // Check for direct video URL
+        if (content.url) {
+            videoUrl = content.url;
         }
 
-        if (data.thumbnail_url) {
-            thumbnail = data.thumbnail_url;
-        } else if (data.image_versions2 && data.image_versions2.candidates) {
-            thumbnail = data.image_versions2.candidates[0].url;
+        // Check for renderable videos
+        if (!videoUrl && content.renderableVideos && content.renderableVideos.length > 0) {
+            const video = content.renderableVideos[0];
+            videoUrl = video.url || null;
+        }
+
+        // Get thumbnail
+        if (content.thumbnail) {
+            thumbnail = content.thumbnail;
         }
 
         if (!videoUrl) {
@@ -105,8 +126,8 @@ app.get('/api/download', async (req, res) => {
             platform: 'instagram',
             videoUrl: videoUrl,
             thumbnail: thumbnail,
-            title: data.caption?.text || 'Instagram Video',
-            duration: data.video_duration || 0,
+            title: data.metadata?.title || 'Instagram Video',
+            duration: content.metadata?.duration || 0,
             fileSize: 0
         });
 
@@ -120,7 +141,7 @@ app.get('/api/download', async (req, res) => {
 });
 
 // 2. Instagram User Profile
-app.get('/api/instagram/user', async (req, res) => {
+app.get('/api/instagram/profile', async (req, res) => {
     try {
         const { username } = req.query;
 
@@ -131,9 +152,11 @@ app.get('/api/instagram/user', async (req, res) => {
             });
         }
 
-        console.log('👤 Instagram user request for:', username);
+        console.log('👤 Instagram profile request for:', username);
 
-        const data = await callRapidAPI('/instagram/user', { username });
+        const data = await callRapidAPI('/instagram/v3/user/profile/details', {
+            username: username
+        });
 
         res.json({
             success: true,
@@ -142,7 +165,7 @@ app.get('/api/instagram/user', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Instagram User Error:', error.message);
+        console.error('Instagram Profile Error:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
@@ -150,7 +173,40 @@ app.get('/api/instagram/user', async (req, res) => {
     }
 });
 
-// 3. Facebook Posts
+// 3. Instagram User ID
+app.get('/api/instagram/userid', async (req, res) => {
+    try {
+        const { username } = req.query;
+
+        if (!username) {
+            return res.status(400).json({
+                success: false,
+                error: 'Username parameter is required'
+            });
+        }
+
+        console.log('🔍 Instagram User ID request for:', username);
+
+        const data = await callRapidAPI('/instagram/v3/user/profile/id-from-username', {
+            username: username
+        });
+
+        res.json({
+            success: true,
+            platform: 'instagram',
+            data: data
+        });
+
+    } catch (error) {
+        console.error('Instagram UserID Error:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 4. Facebook Post Details
 app.get('/api/facebook/post', async (req, res) => {
     try {
         const { url } = req.query;
@@ -164,7 +220,9 @@ app.get('/api/facebook/post', async (req, res) => {
 
         console.log('📘 Facebook post request for:', url);
 
-        const data = await callRapidAPI('/facebook/posts', { url });
+        const data = await callRapidAPI('/facebook/v3/post/details', {
+            url: url
+        });
 
         res.json({
             success: true,
@@ -181,21 +239,23 @@ app.get('/api/facebook/post', async (req, res) => {
     }
 });
 
-// 4. Facebook Profile
+// 5. Facebook Profile
 app.get('/api/facebook/profile', async (req, res) => {
     try {
-        const { username } = req.query;
+        const { url } = req.query;
 
-        if (!username) {
+        if (!url) {
             return res.status(400).json({
                 success: false,
-                error: 'Username parameter is required'
+                error: 'URL parameter is required'
             });
         }
 
-        console.log('👤 Facebook profile request for:', username);
+        console.log('👤 Facebook profile request for:', url);
 
-        const data = await callRapidAPI('/facebook/profile', { username });
+        const data = await callRapidAPI('/facebook/v3/profile/details', {
+            url: url
+        });
 
         res.json({
             success: true,
@@ -212,7 +272,7 @@ app.get('/api/facebook/profile', async (req, res) => {
     }
 });
 
-// 5. TikTok Post
+// 6. TikTok Post
 app.get('/api/tiktok/post', async (req, res) => {
     try {
         const { url } = req.query;
@@ -226,7 +286,9 @@ app.get('/api/tiktok/post', async (req, res) => {
 
         console.log('🎵 TikTok post request for:', url);
 
-        const data = await callRapidAPI('/tiktok/post', { url });
+        const data = await callRapidAPI('/tiktok/v3/post/details', {
+            url: url
+        });
 
         res.json({
             success: true,
@@ -243,21 +305,23 @@ app.get('/api/tiktok/post', async (req, res) => {
     }
 });
 
-// 6. TikTok User
+// 7. TikTok User
 app.get('/api/tiktok/user', async (req, res) => {
     try {
-        const { username } = req.query;
+        const { url } = req.query;
 
-        if (!username) {
+        if (!url) {
             return res.status(400).json({
                 success: false,
-                error: 'Username parameter is required'
+                error: 'URL parameter is required'
             });
         }
 
-        console.log('👤 TikTok user request for:', username);
+        console.log('👤 TikTok user request for:', url);
 
-        const data = await callRapidAPI('/tiktok/user', { username });
+        const data = await callRapidAPI('/tiktok/v3/user/details', {
+            url: url
+        });
 
         res.json({
             success: true,
@@ -278,6 +342,5 @@ app.get('/api/tiktok/user', async (req, res) => {
 app.listen(PORT, () => {
     console.log('✅ Server running on port', PORT);
     console.log('🔑 RapidAPI: Configured ✅');
-    console.log('📱 Features: 6 endpoints ready');
+    console.log('📱 Features: 7 endpoints ready');
 });
-
