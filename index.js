@@ -8,8 +8,8 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Cobalt API endpoint
-const COBALT_API = 'https://api.cobalt.tools/api/json';
+// Cobalt API v9 endpoint
+const COBALT_API = 'https://api.cobalt.tools/';
 
 app.get('/', (req, res) => {
   res.json({
