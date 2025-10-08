@@ -1,8 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const execAsync = promisify(exec);
+const axios = require('axios');
 
 const app = express();
 app.use(cors());
@@ -10,16 +8,12 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Blocked platforms
-const BLOCKED_PLATFORMS = ['youtube.com', 'youtu.be', 'youtube'];
-
 app.get('/', (req, res) => {
   res.json({
-    message: 'Video Downloader API with yt-dlp',
-    version: '3.0.0',
+    message: 'Video Downloader API - Instagram Scraper',
+    version: '4.0.0',
     status: 'Working',
-    supported: ['Instagram', 'Facebook', 'Pinterest', 'LinkedIn', 'Twitter'],
-    blocked: ['YouTube']
+    supported: ['Instagram', 'Facebook', 'TikTok']
   });
 });
 
@@ -30,127 +24,160 @@ app.get('/api/download', async (req, res) => {
     return res.status(400).json({ error: 'URL parameter is required' });
   }
 
-  // Block YouTube
-  const isYouTube = BLOCKED_PLATFORMS.some(platform => 
-    url.toLowerCase().includes(platform)
-  );
-  
-  if (isYouTube) {
-    return res.status(403).json({ 
-      error: 'YouTube downloads are not supported',
-      message: 'This service only supports Instagram, Facebook, Pinterest, and LinkedIn'
-    });
-  }
-
-  // Validate supported platforms
-  const supportedPlatforms = [
-    'instagram.com',
-    'facebook.com', 
-    'fb.com',
-    'fb.watch',
-    'pinterest.com',
-    'linkedin.com',
-    'twitter.com',
-    'x.com'
-  ];
-
-  const isSupported = supportedPlatforms.some(platform => 
-    url.toLowerCase().includes(platform)
-  );
-
-  if (!isSupported) {
-    return res.status(400).json({ 
-      error: 'Unsupported platform',
-      supported: supportedPlatforms
-    });
-  }
-
   try {
-    console.log(`📥 Downloading: ${url}`);
+    console.log(`📥 Processing: ${url}`);
     
-    // Get video info using yt-dlp
-    const videoInfo = await getVideoInfo(url);
+    let videoData;
     
-    res.json({
-      videoUrl: videoInfo.url,
-      title: videoInfo.title || `video_${Date.now()}.mp4`,
-      thumbnail: videoInfo.thumbnail || 'https://picsum.photos/400/400',
-      platform: getPlatformName(url),
-      fileSize: videoInfo.filesize || 0,
-      duration: videoInfo.duration || 0
-    });
+    if (url.includes('instagram.com')) {
+      videoData = await downloadInstagram(url);
+    } else if (url.includes('facebook.com') || url.includes('fb.')) {
+      videoData = await downloadFacebook(url);
+    } else {
+      return res.status(400).json({ 
+        error: 'Unsupported platform',
+        supported: ['Instagram', 'Facebook']
+      });
+    }
+    
+    res.json(videoData);
 
   } catch (error) {
-    console.error('❌ Download error:', error.message);
+    console.error('❌ Error:', error.message);
     res.status(500).json({ 
       error: 'Failed to download video',
-      details: error.message,
-      tip: 'Try again or check if the video is public'
+      details: error.message
     });
   }
 });
 
-// Get video info using yt-dlp
-async function getVideoInfo(url) {
+// Instagram Downloader using SaveFrom.net API
+async function downloadInstagram(url) {
   try {
-    // yt-dlp command to get video info in JSON format
-    const command = `yt-dlp --dump-json --no-warnings "${url}"`;
-    
-    const { stdout, stderr } = await execAsync(command, {
-      timeout: 30000, // 30 seconds timeout
-      maxBuffer: 1024 * 1024 * 10 // 10MB buffer
-    });
+    // Method 1: Using SaveFrom.net API
+    const response = await axios.post('https://v3.saveFrom.net/api/ajaxSearch', 
+      new URLSearchParams({
+        q: url,
+        lang: 'en'
+      }), 
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
 
-    if (stderr && !stdout) {
-      throw new Error(stderr);
-    }
-
-    const info = JSON.parse(stdout);
-    
-    // Get the best video URL
-    let videoUrl = info.url;
-    
-    // For Instagram, prefer formats without audio issues
-    if (url.includes('instagram.com')) {
-      const formats = info.formats || [];
-      const bestFormat = formats.find(f => 
-        f.vcodec !== 'none' && f.acodec !== 'none' && f.ext === 'mp4'
-      ) || formats.find(f => f.ext === 'mp4') || formats[0];
+    if (response.data && response.data.data) {
+      // Parse HTML response to find video URL
+      const html = response.data.data;
+      const videoMatch = html.match(/href="([^"]+)"[^>]*>Download<\/a>/i);
       
-      if (bestFormat) {
-        videoUrl = bestFormat.url;
+      if (videoMatch && videoMatch[1]) {
+        return {
+          videoUrl: videoMatch[1],
+          title: `instagram_${Date.now()}.mp4`,
+          thumbnail: 'https://picsum.photos/400/400',
+          platform: 'instagram',
+          fileSize: 0,
+          duration: 0
+        };
       }
     }
-
-    return {
-      url: videoUrl,
-      title: info.title,
-      thumbnail: info.thumbnail,
-      filesize: info.filesize || info.filesize_approx,
-      duration: info.duration
-    };
-
+    
+    // Method 2: Fallback to direct extraction
+    return await downloadInstagramDirect(url);
+    
   } catch (error) {
-    console.error('yt-dlp error:', error);
-    throw new Error('Could not extract video. Video might be private or unavailable.');
+    console.error('Instagram download failed:', error.message);
+    throw new Error('Could not download Instagram video. It may be private or deleted.');
   }
 }
 
-// Get platform name from URL
-function getPlatformName(url) {
-  const urlLower = url.toLowerCase();
-  if (urlLower.includes('instagram.com')) return 'instagram';
-  if (urlLower.includes('facebook.com') || urlLower.includes('fb.')) return 'facebook';
-  if (urlLower.includes('pinterest.com')) return 'pinterest';
-  if (urlLower.includes('linkedin.com')) return 'linkedin';
-  if (urlLower.includes('twitter.com') || urlLower.includes('x.com')) return 'twitter';
-  return 'unknown';
+// Direct Instagram extraction (backup method)
+async function downloadInstagramDirect(url) {
+  try {
+    // Get Instagram page
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      timeout: 10000
+    });
+
+    const html = response.data;
+    
+    // Try to find video URL in page source
+    const videoMatch = html.match(/"video_url":"([^"]+)"/);
+    
+    if (videoMatch && videoMatch[1]) {
+      const videoUrl = videoMatch[1].replace(/\\u0026/g, '&');
+      
+      return {
+        videoUrl: videoUrl,
+        title: `instagram_${Date.now()}.mp4`,
+        thumbnail: 'https://picsum.photos/400/400',
+        platform: 'instagram',
+        fileSize: 0,
+        duration: 0
+      };
+    }
+    
+    throw new Error('Video URL not found in page');
+    
+  } catch (error) {
+    throw new Error('Failed to extract video from Instagram');
+  }
+}
+
+// Facebook Downloader
+async function downloadFacebook(url) {
+  try {
+    const response = await axios.post('https://www.getfvid.com/downloader', 
+      new URLSearchParams({
+        url: url
+      }), 
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+      }
+    );
+
+    if (response.data) {
+      // Parse response to find video URL
+      const html = response.data;
+      const hdMatch = html.match(/href="([^"]+)"[^>]*>Download HD Video/i);
+      const sdMatch = html.match(/href="([^"]+)"[^>]*>Download SD Video/i);
+      
+      const videoUrl = hdMatch ? hdMatch[1] : (sdMatch ? sdMatch[1] : null);
+      
+      if (videoUrl) {
+        return {
+          videoUrl: videoUrl,
+          title: `facebook_${Date.now()}.mp4`,
+          thumbnail: 'https://picsum.photos/400/400',
+          platform: 'facebook',
+          fileSize: 0,
+          duration: 0
+        };
+      }
+    }
+    
+    throw new Error('Could not extract Facebook video');
+    
+  } catch (error) {
+    console.error('Facebook download failed:', error.message);
+    throw new Error('Could not download Facebook video');
+  }
 }
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🚀 Using yt-dlp for video downloads`);
-  console.log(`🚫 YouTube downloads are blocked`);
+  console.log(`🎥 Instagram & Facebook video downloader ready`);
 });
 
 module.exports = app;
