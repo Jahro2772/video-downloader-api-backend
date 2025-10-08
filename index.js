@@ -60,19 +60,11 @@ app.get('/api/download', async (req, res) => {
   }
 });
 
-// Download using Cobalt API
+// Download using Cobalt API v9
 async function downloadWithCobalt(url) {
   try {
     const response = await axios.post(COBALT_API, {
-      url: url,
-      vCodec: 'h264',
-      vQuality: '720',
-      aFormat: 'mp3',
-      isAudioOnly: false,
-      isTTFullAudio: false,
-      isAudioMuted: false,
-      dubLang: false,
-      disableMetadata: false
+      url: url
     }, {
       headers: {
         'Accept': 'application/json',
@@ -81,34 +73,47 @@ async function downloadWithCobalt(url) {
       timeout: 30000
     });
 
-    console.log('Cobalt response:', response.data);
+    console.log('Cobalt response:', JSON.stringify(response.data, null, 2));
 
-    if (response.data.status === 'error' || response.data.status === 'rate-limit') {
-      throw new Error(response.data.text || 'Cobalt API error');
+    // Check for errors
+    if (response.data.error) {
+      throw new Error(response.data.error);
     }
 
-    if (response.data.status === 'redirect' || response.data.status === 'tunnel') {
+    // v9 API returns different structures
+    // Format 1: Direct URL
+    if (response.data.url) {
       return {
         url: response.data.url,
-        thumb: response.data.thumb
+        thumb: response.data.thumbnail || response.data.thumb
       };
     }
 
-    if (response.data.status === 'picker') {
-      // Multiple videos (carousel), return first one
-      if (response.data.picker && response.data.picker.length > 0) {
-        return {
-          url: response.data.picker[0].url,
-          thumb: response.data.picker[0].thumb
-        };
-      }
+    // Format 2: Picker (multiple videos/images)
+    if (response.data.picker && Array.isArray(response.data.picker) && response.data.picker.length > 0) {
+      const firstItem = response.data.picker[0];
+      return {
+        url: firstItem.url,
+        thumb: firstItem.thumbnail || firstItem.thumb
+      };
     }
 
+    // Format 3: Media object
+    if (response.data.media) {
+      return {
+        url: response.data.media,
+        thumb: response.data.thumbnail
+      };
+    }
+
+    console.error('Unexpected response structure:', response.data);
     throw new Error('Could not extract video URL from response');
 
   } catch (error) {
     if (error.response) {
-      throw new Error(`Cobalt API error: ${error.response.data?.text || error.response.statusText}`);
+      const errorData = error.response.data;
+      console.error('Cobalt API error response:', errorData);
+      throw new Error(`Cobalt API error: ${errorData.error || errorData.text || error.response.statusText}`);
     }
     throw new Error(error.message);
   }
